@@ -2,10 +2,22 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ZenQuote, CompletionBlessing } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+// 增加安全检查，防止 process 未定义时报错
+const getApiKey = () => {
+  try {
+    return process.env.API_KEY || "";
+  } catch (e) {
+    return "";
+  }
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const fetchZenWisdom = async (): Promise<ZenQuote> => {
   try {
+    const key = getApiKey();
+    if (!key) throw new Error("API Key is missing");
+
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: "Generate a short Zen quote in Chinese related to standing meditation (Zhan Zhuang), internal energy, or mindfulness. Also provide a one-sentence tip for posture or breathing during Zhan Zhuang.",
@@ -36,6 +48,9 @@ export const fetchZenWisdom = async (): Promise<ZenQuote> => {
 
 export const fetchCompletionBlessing = async (durationMinutes: number): Promise<CompletionBlessing> => {
   try {
+    const key = getApiKey();
+    if (!key) throw new Error("API Key is missing");
+
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `The user just finished ${durationMinutes} minutes of Zhan Zhuang (standing meditation). Generate a 4-character poetic title (e.g. 功德圆满, 气定神闲) and a short, encouraging Zen-style blessing in Chinese (max 30 words).`,
