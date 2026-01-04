@@ -1,6 +1,6 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 Noto Serif SC 字体 -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;500;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <!-- 引入 Babel Standalone 处理 TSX -->
+    <!-- 引入 Babel Standalone 处理 JSX/TypeScript -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
@@ -20,10 +20,13 @@
         .font-serif-sc {
             font-family: 'Noto Serif SC', serif;
         }
+        /* 自定义滚动条 */
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e7e5e4; border-radius: 10px; }
     </style>
 
     <script>
-        // 全局 Shim，防止 SDK 报错
+        // 全局环境变量模拟，防止 SDK 报错
         window.process = {
             env: { API_KEY: "" }
         };
@@ -44,9 +47,257 @@
 </script>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <!-- 加载状态占位符 -->
+        <div class="min-h-screen flex items-center justify-center bg-stone-50">
+            <div class="text-center">
+                <div class="inline-block w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+                <p class="mt-4 text-stone-500 font-serif-sc">正在加载禅院...</p>
+            </div>
+        </div>
+    </div>
     
-    <!-- 必须使用 type="text/babel" 并通过 data-presets 开启 typescript 支持 -->
-    <script type="text/babel" data-presets="react,typescript" src="./index.tsx"></script>
+    <!-- 所有逻辑内联，避免 404 问题 -->
+    <script type="text/babel" data-presets="react,typescript">
+        import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { GoogleGenAI, Type } from "@google/genai";
+        import { 
+          Play, Pause, RotateCcw, Settings, Wind, Award, 
+          CheckCircle2, Volume2, VolumeX, BookOpen, Calendar, 
+          Download, Share2 
+        } from 'lucide-react';
+
+        // --- 类型定义 ---
+        enum TimerStatus { IDLE = 'IDLE', RUNNING = 'RUNNING', PAUSED = 'PAUSED', COMPLETED = 'COMPLETED' }
+
+        // --- AI 服务 ---
+        const getApiKey = () => {
+          try { return window.process?.env?.API_KEY || ""; } catch (e) { return ""; }
+        };
+
+        const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+        const fetchZenWisdom = async () => {
+          try {
+            const key = getApiKey();
+            if (!key) throw new Error("No Key");
+            const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: "为站桩修行者生成一句中文禅语，并给出一个动作或呼吸的建议。返回 JSON 格式。",
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    quote: { type: Type.STRING },
+                    author: { type: Type.STRING },
+                    advice: { type: Type.STRING }
+                  },
+                  required: ["quote", "author", "advice"]
+                }
+              }
+            });
+            return JSON.parse(response.text || "{}");
+          } catch (e) {
+            return { quote: "静心站立，感受天地的律动。", author: "古德", advice: "虚灵顶劲，沉肩坠肘，气沉丹田。" };
+          }
+        };
+
+        const fetchCompletionBlessing = async (mins) => {
+          try {
+            const key = getApiKey();
+            if (!key) throw new Error("No Key");
+            const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: `用户完成了 ${mins} 分钟的站桩。生成一个四字标题和一段简短的祝福。`,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: { title: { type: Type.STRING }, message: { type: Type.STRING } },
+                  required: ["title", "message"]
+                }
+              }
+            });
+            return JSON.parse(response.text || "{}");
+          } catch (e) {
+            return { title: "功德圆满", message: "每一次静立都是对身心的洗涤，愿您气血充盈。" };
+          }
+        };
+
+        // --- 组件 ---
+        const CircularTimer = ({ timeLeft, totalTime }) => {
+          const radius = 120;
+          const circumference = 2 * Math.PI * radius;
+          const progress = totalTime > 0 ? timeLeft / totalTime : 0;
+          const strokeDashoffset = circumference * (1 - progress);
+
+          const formatTime = (seconds) => {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+          };
+
+          return (
+            <div className="relative flex items-center justify-center w-64 h-64 md:w-80 md:h-80">
+              <svg className="w-full h-full transform -rotate-90">
+                <circle className="text-stone-200" strokeWidth="8" stroke="currentColor" fill="transparent" r={radius} cx="50%" cy="50%" />
+                <circle className="text-emerald-600 transition-all duration-1000 ease-linear" strokeWidth="8" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" stroke="currentColor" fill="transparent" r={radius} cx="50%" cy="50%" />
+              </svg>
+              <div className="absolute flex flex-col items-center">
+                <span className="text-5xl md:text-6xl font-light text-stone-800 font-serif-sc">{formatTime(timeLeft)}</span>
+                <span className="text-sm text-stone-400 mt-2 tracking-widest uppercase">{timeLeft > 0 ? "气定神闲" : "圆满"}</span>
+              </div>
+            </div>
+          );
+        };
+
+        const App = () => {
+          const [status, setStatus] = useState(TimerStatus.IDLE);
+          const [duration, setDuration] = useState(600);
+          const [timeLeft, setTimeLeft] = useState(600);
+          const [wisdom, setWisdom] = useState(null);
+          const [history, setHistory] = useState([]);
+          const [showSettings, setShowSettings] = useState(false);
+          const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+          const [blessing, setBlessing] = useState(null);
+          const [isPunchInModalOpen, setIsPunchInModalOpen] = useState(false);
+          
+          const timerRef = useRef(null);
+
+          useEffect(() => {
+            fetchZenWisdom().then(setWisdom);
+            const stored = localStorage.getItem('zhanzhuang_logs');
+            if (stored) setHistory(JSON.parse(stored));
+          }, []);
+
+          const streak = useMemo(() => {
+            if (history.length === 0) return 0;
+            const dates = Array.from(new Set(history.map(h => h.date))).sort((a, b) => b.localeCompare(a));
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+            if (dates[0] !== today && dates[0] !== yesterday) return 0;
+            let count = 0;
+            let current = dates[0] === today ? today : yesterday;
+            for (const d of dates) {
+              if (d === current) {
+                count++;
+                current = new Date(new Date(current).getTime() - 86400000).toISOString().split('T')[0];
+              } else break;
+            }
+            return count;
+          }, [history]);
+
+          const handleStart = () => setStatus(TimerStatus.RUNNING);
+          const handlePause = () => setStatus(TimerStatus.PAUSED);
+          const handleReset = () => { setStatus(TimerStatus.IDLE); setTimeLeft(duration); };
+
+          const saveHistory = useCallback(async (d) => {
+            const today = new Date().toISOString().split('T')[0];
+            const newHistory = [{ id: Date.now().toString(), duration: d, date: today }, ...history];
+            setHistory(newHistory);
+            localStorage.setItem('zhanzhuang_logs', JSON.stringify(newHistory));
+            const bless = await fetchCompletionBlessing(Math.floor(d / 60));
+            setBlessing(bless);
+            setIsPunchInModalOpen(true);
+          }, [history]);
+
+          useEffect(() => {
+            if (status === TimerStatus.RUNNING && timeLeft > 0) {
+              timerRef.current = setInterval(() => setTimeLeft(p => p - 1), 1000);
+            } else if (timeLeft === 0 && status === TimerStatus.RUNNING) {
+              setStatus(TimerStatus.COMPLETED);
+              saveHistory(duration);
+            }
+            return () => clearInterval(timerRef.current);
+          }, [status, timeLeft]);
+
+          return (
+            <div className="min-h-screen flex flex-col bg-stone-50 text-stone-800">
+              <header className="px-6 py-4 flex justify-between items-center bg-white/70 backdrop-blur-lg sticky top-0 z-30 border-b border-stone-100">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg"><Wind className="text-white" size={24} /></div>
+                  <div><h1 className="text-lg font-serif-sc font-bold">站桩禅院</h1><p className="text-[10px] text-stone-400 uppercase tracking-widest">每日一站 · 身轻神清</p></div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100 flex items-center space-x-1">
+                    <Award size={14} className="text-emerald-600" /><span className="text-xs font-bold text-emerald-700">{streak} 天连修</span>
+                  </div>
+                  <button onClick={() => setShowSettings(!showSettings)} className="p-2 text-stone-500 hover:bg-stone-100 rounded-full transition-all"><Settings size={20} /></button>
+                </div>
+              </header>
+
+              <main className="flex-1 flex flex-col items-center justify-center p-4">
+                {wisdom && (
+                  <div className="max-w-md text-center mb-12 px-4 transition-opacity duration-1000">
+                    <p className="text-xl font-serif-sc text-stone-700 leading-relaxed italic">「{wisdom.quote}」</p>
+                    <p className="text-sm text-stone-400 mt-2">— {wisdom.author}</p>
+                  </div>
+                )}
+                
+                <CircularTimer timeLeft={timeLeft} totalTime={duration} />
+
+                <div className="mt-12 flex items-center space-x-8">
+                  <button onClick={handleReset} className="p-4 bg-white shadow-sm border border-stone-200 rounded-2xl text-stone-400 hover:text-stone-600 active:scale-95 transition-all"><RotateCcw size={24} /></button>
+                  {status === TimerStatus.RUNNING ? (
+                    <button onClick={handlePause} className="w-20 h-20 bg-emerald-600 text-white rounded-3xl shadow-xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all"><Pause size={32} /></button>
+                  ) : (
+                    <button onClick={handleStart} disabled={timeLeft === 0} className="w-20 h-20 bg-emerald-600 text-white rounded-3xl shadow-xl flex items-center justify-center disabled:bg-stone-300 hover:scale-105 active:scale-95 transition-all"><Play size={32} fill="currentColor" className="ml-1" /></button>
+                  )}
+                  <button onClick={() => setIsAudioEnabled(!isAudioEnabled)} className={`p-4 bg-white shadow-sm border border-stone-200 rounded-2xl transition-all ${isAudioEnabled ? 'text-emerald-600' : 'text-stone-400'}`}>{isAudioEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}</button>
+                </div>
+
+                {showSettings && (
+                  <div className="mt-8 max-w-sm w-full bg-white p-6 rounded-3xl shadow-2xl border border-stone-100">
+                    <h3 className="text-sm font-bold text-stone-400 uppercase tracking-widest mb-6">设定修行时长</h3>
+                    <div className="flex items-center justify-between">
+                      <span className="text-2xl font-serif-sc font-bold text-emerald-700">{duration/60} <span className="text-sm font-normal text-stone-400">分钟</span></span>
+                      <input type="range" min="1" max="120" value={duration/60} onChange={(e) => {
+                        const v = parseInt(e.target.value) * 60;
+                        setDuration(v); if (status === TimerStatus.IDLE) setTimeLeft(v);
+                      }} className="w-2/3 accent-emerald-600" />
+                    </div>
+                  </div>
+                )}
+              </main>
+
+              <footer className="w-full max-w-4xl mx-auto px-6 py-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-white p-6 rounded-3xl border border-stone-100 shadow-sm">
+                    <div className="flex items-center space-x-3 mb-2"><BookOpen size={18} className="text-emerald-600" /><h4 className="font-bold">修行要领</h4></div>
+                    <p className="text-sm text-stone-500 leading-relaxed">{wisdom?.advice || "静心观照，呼吸自然。"}</p>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border border-stone-100 shadow-sm">
+                    <div className="flex items-center space-x-3 mb-2"><Calendar size={18} className="text-stone-600" /><h4 className="font-bold">精进日志</h4></div>
+                    <div className="text-xs space-y-1 max-h-24 overflow-y-auto custom-scrollbar">
+                        {history.length > 0 ? history.slice(0, 5).map(h => (
+                            <div key={h.id} className="flex justify-between border-b border-stone-50 pb-1 py-1">
+                                <span className="text-stone-400">{h.date}</span>
+                                <span className="text-emerald-600 font-bold">{Math.floor(h.duration/60)} 分钟</span>
+                            </div>
+                        )) : <p className="text-stone-300 italic">虚位以待，开始第一次站桩吧</p>}
+                    </div>
+                  </div>
+                </div>
+              </footer>
+
+              {isPunchInModalOpen && blessing && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+                  <div className="bg-white max-w-sm w-full rounded-[40px] shadow-2xl overflow-hidden text-center p-10 animate-in zoom-in-95 duration-500">
+                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle2 size={32} /></div>
+                    <h2 className="text-3xl font-serif-sc font-bold mb-4">{blessing.title}</h2>
+                    <p className="text-stone-600 italic mb-8 leading-relaxed">“{blessing.message}”</p>
+                    <button onClick={() => setIsPunchInModalOpen(false)} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-200 active:scale-95 transition-all">收功回神</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
